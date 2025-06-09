@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LED Matrix Drawer with Web Serial</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 20px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(8, 40px);
+      grid-gap: 4px;
+      margin: 20px auto;
+      width: fit-content;
+    }
+    .cell {
+      width: 40px;
+      height: 40px;
+      border: 1px solid #aaa;
+      cursor: pointer;
+      background-color: #fff;
+    }
+    .cell.on {
+      background-color: rgb(255, 13, 0);
+    }
+    #output {
+      margin-top: 20px;
+      white-space: pre-wrap;
+      font-family: monospace;
+    }
+    button {
+      margin: 5px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>LED Matrix Drawer</h1>
+  <button onclick="connectSerial()">Connect to Arduino</button>
+  <div class="grid" id="grid"></div>
+
+  <div>
+    <button onclick="clearGrid()">Clear</button>
+  </div>
+
+  <h3>Last Command Sent:</h3>
+  <div id="output"></div>
+
+  <script>
+    const gridSize = 8;
+    const gridElement = document.getElementById('grid');
+    const outputElement = document.getElementById('output');
+    let state = Array(gridSize).fill().map(() => Array(gridSize).fill(false));
+    let port, writer;
+
+    async function connectSerial() {
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 9600 });
+        writer = port.writable.getWriter();
+        console.log("Serial connection opened.");
+      } catch (err) {
+        alert("Failed to open serial port: " + err.message);
+      }
+    }
+
+    async function sendCommand(command) {
+      if (!writer) {
+        console.warn("Serial not connected.");
+        return;
+      }
+      const encoder = new TextEncoder();
+      await writer.write(encoder.encode(command + "\n"));
+      outputElement.textContent = command;
+    }
+
+    function toggleCell(row, col, cell) {
+      state[row][col] = !state[row][col];
+      cell.classList.toggle('on', state[row][col]);
+      const command = `${row + 1}-${col + 1}-${state[row][col] ? 'on' : 'off'}`;
+      sendCommand(command);
+    }
+
+    function clearGrid() {
+      sendCommand(`clear`);
+      document.querySelectorAll('.cell').forEach(cell => {
+        cell.classList.remove('on');
+      });
+    }
+
+    function initGrid() {
+      for (let row = 0; row < gridSize; row++) {
+        for (let col = 0; col < gridSize; col++) {
+          const cell = document.createElement('div');
+          cell.classList.add('cell');
+          cell.addEventListener('click', () => toggleCell(row, col, cell));
+          gridElement.appendChild(cell);
+        }
+      }
+    }
+
+    initGrid();
+  </script>
+
+</body>
+</html>
