@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Servo Sweep Controller</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/milligram/1.4.1/milligram.min.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+
+  <div class="container">
+    <h2>Brush O Matic</h2>
+    
+    <button id="connectBtn" class="button">Connect to Arduino</button>
+
+    <form id="sweepForm" style="margin-top: 1rem;">
+      <div class="row">
+        <div class="column">
+          <label for="startAngle">Start Angle</label>
+          <input type="number" id="startAngle" name="startAngle" min="0" max="180" required>
+        </div>
+        <div class="column">
+          <label for="endAngle">End Angle</label>
+          <input type="number" id="endAngle" name="endAngle" min="0" max="180" required>
+        </div>
+        <div class="column">
+          <label for="repeatCount">Repeat Count</label>
+          <input type="number" id="repeatCount" name="repeatCount" min="1" required>
+        </div>
+      </div>
+      <button type="submit" class="button">Brush them teeth!</button>
+    </form>
+
+    <pre id="status"> Not connected</pre>
+  </div>
+    <script>
+
+    let port;
+    let writer;
+    let reader;
+    let keepReading = true;
+    let canSend = true;
+    let statusDisplay = document.getElementById("status");
+
+    const connectButton = document.getElementById("connectBtn");
+
+    async function connectSerial() {
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        statusDisplay.textContent = " Connected";
+
+        const encoder = new TextEncoderStream();
+        const outputDone = encoder.readable.pipeTo(port.writable);
+        writer = encoder.writable.getWriter();
+
+        const decoder = new TextDecoderStream();
+        const inputDone = port.readable.pipeTo(decoder.writable);
+        reader = decoder.readable.getReader();
+
+        keepReading = true;
+        readLines(reader);
+
+      } catch (err) {
+        statusDisplay.textContent = " Connection failed";
+        console.error(err);
+      }
+    }
+
+    async function readLines(reader) {
+        let buffer = "";
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            if (value) {
+                buffer += value;
+
+                // Process every full line in the buffer
+                let lines = buffer.split("\n");
+                buffer = lines.pop(); // save incomplete line
+
+                for (let line of lines) {
+                    onMessage(line.trim());
+                }
+            }
+        }
+    }
+
+    document.getElementById("sweepForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const start = document.getElementById("startAngle").value;
+      const end = document.getElementById("endAngle").value;
+      const times = document.getElementById("repeatCount").value;
+
+      const message = `${start}-${end}-${times}\n`;
+
+      if (writer) {
+        await writer.write(message);
+        document.getElementById("status").textContent = ` Sent: ${message.trim()}`;
+      } else {
+        document.getElementById("status").textContent = " Please connect to Arduino first.";
+      }
+    });
+
+    function onMessage(message) {
+        console.log(`Received: ${message}`);
+    }
+
+    connectButton.addEventListener("click", connectSerial);
+
+    
+  </script>
+</body>
+</html>
