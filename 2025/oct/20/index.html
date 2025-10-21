@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bucket Catch – Arduino Buttons + Web Serial</title>
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; background: #0e0f12; color: #e7e9ee; }
+    .wrap { display:flex; align-items:center; justify-content:center; height:100%; padding:16px; box-sizing:border-box; }
+    .panel { width: min(760px, 100%); }
+    .topbar { display:flex; gap:12px; align-items:center; justify-content:space-between; margin-bottom:12px; }
+    .btn { cursor:pointer; border:none; border-radius:14px; padding:10px 14px; font-weight:600; color:#0e0f12; background:#a2d2ff; transition:transform .06s ease, filter .15s ease; }
+    .btn:active { transform: translateY(1px) scale(.99); filter: brightness(.95); }
+    .btn.secondary { background:#ffd6a5; }
+    .btn.warn { background:#ffadad; }
+    .status { opacity:.85; font-size:14px; }
+    canvas { width:100%; height:auto; background: linear-gradient(180deg, #1a1c22, #121318); border-radius: 16px; display:block; box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.05);}    
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <div class="topbar">
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button id="connectBtn" class="btn">🔌 Connect Arduino</button>
+          <button id="disconnectBtn" class="btn warn">❌ Disconnect</button>
+          <button id="startBtn" class="btn secondary">▶️ Start / Pause (Space)</button>
+        </div>
+        <div class="status" id="status">Not connected</div>
+      </div>
+      <canvas id="game" width="480" height="680"></canvas>
+    </div>
+  </div>
+
+  <script>
+  // ======= Simple Bucket Catch Game (live score & time, hearts, Web Serial) =======
+  // Controls: 3 Arduino buttons (Left, Right, Start) via Web Serial
+  // Keyboard fallback: Left/Right arrows + Space
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+
+  // World
+  const W = canvas.width; const H = canvas.height;
+  const groundY = H - 40;
+
+  // Player bucket
+  const bucket = { x: W/2 - 35, y: groundY - 18, w: 70, h: 18, speed: 5 };
+
+  // Items
+  const items = []; // {x, y, r, vy, type:"gold"|"rock"|"heart"}
+  let spawnTimer = 0;
+  let score = 0;
+  let lives = 3; // start with 3 lives
+  const maxLives = 6; // cap extra lives for balance
+  let highScore = Number(localStorage.getItem('bucket_high_score') || 0);
+
+  // Timekeeping (live)
+  let elapsedMs = 0; // increases only while playing
+  let lastTs = performance.now();
+
+  // Game state
+  let state = 'menu'; // 'menu' | 'playing' | 'gameover' | 'paused'
+
+  // Inputs (Arduino)
+  let btnLeft = false; let btnRight = false; let btnStart = false;
+  let port = null, reader = null, keepReading = false;
+
+  // Inputs (Keyboard fallback)
+  const keys = { left:false, right:false };
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'ArrowLeft') { keys.left = true; }
+    if (e.code === 'ArrowRight') { keys.right = true; }
+    if (e.code === 'Space') { toggleStart(); }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'ArrowLeft') { keys.left = false; }
+    if (e.code === 'ArrowRight') { keys.right = false; }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', toggleStart);
+  function toggleStart(){
+    if(state === 'menu' || state === 'gameover'){ startGame(); }
+    else if(state === 'playing'){ state='paused'; }
+    else if(state === 'paused'){ state='playing'; }
+  }
+
+  // Arduino connect via Web Serial
+  const connectBtn = document.getElementById('connectBtn');
+  const disconnectBtn = document.getElementById('disconnectBtn');
+
+  connectBtn.addEventListener('click', async () => {
+    try {
+      if (!('serial' in navigator)) {
+        alert('Web Serial not supported. Use Chrome/Edge on desktop.');
+        return;
+      }
+      port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      statusEl.textContent = 'Connected. Reading buttons…';
+      keepReading = true;
+      readLoop();
+    } catch (err) {
+      console.error(err);
+      statusEl.textContent = 'Connect failed: ' + err.message;
+    }
+  });
+
+  disconnectBtn.addEventListener('click', disconnectSerial);
+
+  async function disconnectSerial(){
+    try {
+      keepReading = false;
+      if (reader) { try { await reader.cancel(); await reader.releaseLock(); } catch {} }
+      if (port) { try { await port.close(); } catch {} }
+    } finally {
+      port = null; reader = null; btnLeft = btnRight = btnStart = false;
+      statusEl.textContent = 'Disconnected';
+    }
+  }
+
+  async function readLoop(){
+    const decoder = new TextDecoderStream();
+    reader = port.readable.pipeThrough(decoder).getReader();
+    let buffer = '';
+    try {
+      while (keepReading) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += value;
+        let idx;
+        while ((idx = buffer.indexOf('\n')) >= 0){
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx+1);
+          handleSerialLine(line);
+        }
+      }
+    } catch (e) {
+      console.error('Serial read error', e);
+      statusEl.textContent = 'Serial read error: ' + e.message;
+    } finally {
+      try { await reader.releaseLock(); } catch {}
+    }
+  }
+
+  function handleSerialLine(line){
+    // Expect messages like: L1, L0, R1, R0, S1, S0 (state change events)
+    if (!line) return;
+    const c = line[0].toUpperCase();
+    if (c === 'L') {
+      btnLeft = true;
+      btnRight = false;
+    }
+    if (c === 'R') {
+      btnLeft = false;
+      btnRight = true;
+    }
+    if (c === 'S') {
+       toggleStart(); 
+    }
+    statusEl.textContent = `Left:${btnLeft?'✓':'·'} Right:${btnRight?'✓':'·'} Start:${btnStart?'✓':'·'}${port?' — Connected':''}`;
+  }
+
+  function startGame(){
+    items.length = 0; score = 0; lives = 3; spawnTimer = 0; elapsedMs = 0;
+    bucket.x = W/2 - bucket.w/2;
+    state = 'playing';
+  }
+
+  function endGame(){
+    state = 'gameover';
+    if (score > highScore) { highScore = score; localStorage.setItem('bucket_high_score', String(highScore)); }
+  }
+
+  function update(dt){
+    const leftHeld = btnLeft || keys.left;
+    const rightHeld = btnRight || keys.right;
+
+    if (state === 'playing'){
+      elapsedMs += dt; // live time only while playing
+
+      if (leftHeld) bucket.x -= bucket.speed;
+      if (rightHeld) bucket.x += bucket.speed;
+      bucket.x = Math.max(6, Math.min(W - bucket.w - 6, bucket.x));
+
+      // spawn
+      spawnTimer--;
+      if (spawnTimer <= 0){
+        const roll = Math.random();
+        const type = roll < 0.68 ? 'gold' : (roll < 0.92 ? 'rock' : 'heart'); // ~8% hearts
+        const x = Math.random()*(W-26) + 13;
+        items.push({ x, y: -20, r: 12, vy: 2.2 + Math.random()*1.8, type });
+        spawnTimer = 30 + Math.floor(Math.random()*20); // every ~0.8s
+      }
+
+      // move items
+      for (const it of items){ it.y += it.vy; }
+
+      // collisions & cleanup
+      for (let i=items.length-1; i>=0; i--){
+        const it = items[i];
+        if (it.y - it.r > H + 10){ items.splice(i,1); continue; }
+        if (circleRectOverlap(it.x, it.y, it.r, bucket.x, bucket.y, bucket.w, bucket.h)){
+          if (it.type === 'gold'){
+            score += 10;
+          } else if (it.type === 'rock'){
+            lives--; if (lives <= 0) { items.splice(i,1); endGame(); break; }
+          } else if (it.type === 'heart'){
+            lives = Math.min(maxLives, lives + 1);
+          }
+          items.splice(i,1);
+        }
+      }
+    }
+  }
+
+  function circleRectOverlap(cx, cy, r, rx, ry, rw, rh){
+    const nx = Math.max(rx, Math.min(cx, rx+rw));
+    const ny = Math.max(ry, Math.min(cy, ry+rh));
+    const dx = cx - nx; const dy = cy - ny;
+    return (dx*dx + dy*dy) <= r*r;
+  }
+
+  function draw(){
+    // clear
+    ctx.clearRect(0,0,W,H);
+
+    // sky / playfield
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#171922'); g.addColorStop(1,'#0f1015');
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+    // ground line
+    ctx.fillStyle = '#232535'; ctx.fillRect(0, groundY+18, W, 20);
+
+    // header (live HUD)
+    ctx.font = '16px system-ui, sans-serif';
+    ctx.fillStyle = '#b9c0d0';
+    ctx.fillText(`Score: ${score}`, 16, 26);
+    ctx.fillText(`Lives: ${lives}`, 130, 26);
+    ctx.fillText(`High: ${highScore}`, 220, 26);
+    ctx.fillText(`Time: ${formatTime(elapsedMs)}`, 340, 26);
+
+    // Bucket
+    drawBucket();
+
+    // Items
+    for (const it of items){ drawItem(it); }
+
+    // overlays
+    if (state === 'menu') drawCenterText('Bucket Catch', 'Press SPACE or Start');
+    if (state === 'paused') drawCenterText('Paused', 'Press SPACE or Start');
+    if (state === 'gameover') drawCenterText('Game Over', `Score ${score} — SPACE/Start to retry`);
+  }
+
+  function drawCenterText(title, subtitle){
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#e7e9ee';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(title, W/2, H/2 - 20);
+    ctx.font = '16px system-ui, sans-serif';
+    ctx.fillStyle = '#b9c0d0';
+    ctx.fillText(subtitle, W/2, H/2 + 12);
+    ctx.restore();
+  }
+
+  function drawBucket(){
+    ctx.save();
+    ctx.translate(bucket.x, bucket.y);
+    // body
+    ctx.fillStyle = '#a2d2ff';
+    ctx.beginPath();
+    ctx.roundRect(0, 0, bucket.w, bucket.h, 6);
+    ctx.fill();
+    // lip
+    ctx.fillStyle = '#e0f0ff';
+    ctx.fillRect(0, -4, bucket.w, 6);
+    ctx.restore();
+  }
+
+  function drawItem(it){
+    ctx.save();
+    ctx.translate(it.x, it.y);
+    if (it.type === 'gold'){
+      // coin
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.arc(0,0,it.r,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.15)';
+      ctx.beginPath(); ctx.arc(-4,-4,it.r*0.6,0,Math.PI*2); ctx.fill();
+    } else if (it.type === 'rock') {
+      // rock
+      ctx.fillStyle = '#8892a6';
+      ctx.beginPath();
+      ctx.moveTo(-it.r, -it.r*0.4);
+      ctx.lineTo(-it.r*0.3, -it.r);
+      ctx.lineTo(it.r*0.8, -it.r*0.6);
+      ctx.lineTo(it.r, it.r*0.2);
+      ctx.lineTo(it.r*0.2, it.r);
+      ctx.lineTo(-it.r*0.8, it.r*0.6);
+      ctx.closePath();
+      ctx.fill();
+    } else { // heart
+      const r = it.r + 2;
+      ctx.fillStyle = '#ff6b6b';
+      ctx.beginPath();
+      // heart shape using two lobes and a pointy bottom
+      ctx.moveTo(0, r*0.6);
+      ctx.bezierCurveTo(r, r*0.1, r*0.9, -r*0.7, 0, -r*0.2);
+      ctx.bezierCurveTo(-r*0.9, -r*0.7, -r, r*0.1, 0, r*0.6);
+      ctx.closePath();
+      ctx.fill();
+      // shine
+      ctx.fillStyle = 'rgba(255,255,255,.18)';
+      ctx.beginPath();
+      ctx.ellipse(-r*0.25, -r*0.2, r*0.25, r*0.18, Math.PI/6, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Main loop with delta time
+  function loop(ts){
+    const dt = Math.max(0, Math.min(50, ts - lastTs)); // clamp to avoid huge jumps
+    lastTs = ts;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame((t)=>{ lastTs=t; loop(t); });
+
+  // Utility: rounded rect path (if not present on some browsers)
+  if (!CanvasRenderingContext2D.prototype.roundRect){
+    CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
+      const rr = Math.min(r, w/2, h/2);
+      this.beginPath();
+      this.moveTo(x+rr, y);
+      this.arcTo(x+w, y, x+w, y+h, rr);
+      this.arcTo(x+w, y+h, x, y+h, rr);
+      this.arcTo(x, y+h, x, y, rr);
+      this.arcTo(x, y, x+w, y, rr);
+      this.closePath();
+      return this;
+    }
+  }
+
+  function formatTime(ms){
+    const totalSec = Math.floor(ms/1000);
+    const m = Math.floor(totalSec/60);
+    const s = totalSec%60;
+    return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+  </script>
+</body>
+</html>

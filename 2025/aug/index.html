@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Arduino Distance Piano</title>
+</head>
+<body>
+  <h1>Distance-Based Piano</h1>
+  <button id="connectBtn">Connect to Arduino</button>
+  <p>Distance: <span id="distance">--</span> cm</p>
+  <p>Note: <span id="note">--</span></p>
+
+  <script>
+    const connectBtn = document.getElementById('connectBtn');
+    const distanceEl = document.getElementById('distance');
+    const noteEl = document.getElementById('note');
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    let port, reader;
+
+    const noteFrequencies = {
+      'C4': 261.63,
+      'D4': 293.66,
+      'E4': 329.63,
+      'F4': 349.23,
+      'G4': 392.00,
+      'A4': 440.00,
+      'B4': 493.88,
+      'C5': 523.25
+    };
+
+    function distanceToNote(distance) {
+      if (distance < 5) return 'C5';
+      else if (distance < 10) return 'B4';
+      else if (distance < 15) return 'A4';
+      else if (distance < 20) return 'G4';
+      else if (distance < 25) return 'F4';
+      else if (distance < 30) return 'E4';
+      else if (distance < 35) return 'D4';
+      else return 'C4';
+    }
+
+    function playNote(note) {
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(noteFrequencies[note], audioCtx.currentTime);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      oscillator.start();
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.5);
+      oscillator.stop(audioCtx.currentTime + 0.5);
+    }
+
+    connectBtn.addEventListener('click', async () => {
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        reader = port.readable.getReader();
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const text = new TextDecoder().decode(value);
+          const lines = text.split('\n');
+
+          for (const line of lines) {
+            const clean = line.trim();
+            if (clean && !isNaN(clean)) {
+              const distance = parseFloat(clean);
+              distanceEl.textContent = distance.toFixed(1);
+
+              const note = distanceToNote(distance);
+              noteEl.textContent = note;
+              playNote(note);
+            }
+          }
+        }
+
+        reader.releaseLock();
+      } catch (err) {
+        console.error('Connection error:', err);
+      }
+    });
+  </script>
+</body>
+</html>
