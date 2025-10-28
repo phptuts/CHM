@@ -157,9 +157,17 @@
       btnRight = true;
     }
     if (c === 'S') {
+        btnLeft = false;
+        btnRight = false;
        toggleStart(); 
     }
     statusEl.textContent = `Left:${btnLeft?'✓':'·'} Right:${btnRight?'✓':'·'} Start:${btnStart?'✓':'·'}${port?' — Connected':''}`;
+
+    setTimeout(() => {
+        btnLeft = false;
+        btnRight = false;
+        statusEl.textContent = `Left:${btnLeft?'✓':'·'} Right:${btnRight?'✓':'·'} Start:${btnStart?'✓':'·'}${port?' — Connected':''}`;
+    }, 100);
   }
 
   function startGame(){
