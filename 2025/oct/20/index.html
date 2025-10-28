@@ -46,13 +46,13 @@
   const groundY = H - 40;
 
   // Player bucket
-  const bucket = { x: W/2 - 35, y: groundY - 18, w: 70, h: 18, speed: 5 };
+  const bucket = { x: W/2 - 35, y: groundY - 18, w: 70, h: 18, speed: 1 };
 
   // Items
   const items = []; // {x, y, r, vy, type:"gold"|"rock"|"heart"}
   let spawnTimer = 0;
   let score = 0;
-  let lives = 3; // start with 3 lives
+  let lives = 100_000; // start with 3 lives
   const maxLives = 6; // cap extra lives for balance
   let highScore = Number(localStorage.getItem('bucket_high_score') || 0);
 
