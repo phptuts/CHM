@@ -52,8 +52,8 @@
   const items = []; // {x, y, r, vy, type:"gold"|"rock"|"heart"}
   let spawnTimer = 0;
   let score = 0;
-  let lives = 100_000; // start with 3 lives
-  const maxLives = 6; // cap extra lives for balance
+  let lives = 3; // start with 3 lives
+  const maxLives = 1000; // cap extra lives for balance
   let highScore = Number(localStorage.getItem('bucket_high_score') || 0);
 
   // Timekeeping (live)
