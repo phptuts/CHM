@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Arduino Distance Piano</title>
+</head>
+<body>
+  <h1>Distance-Based Piano</h1>
+  <button id="connectBtn">Connect to Arduino</button>
+
+  <script>
+    const connectBtn = document.getElementById('connectBtn');
+    let writer;
+    let port, reader;
+
+    window.addEventListener('keydown', async (event) => {
+      if (!writer) {
+        alert('please connect to the arduino.');
+        return;
+      }
+      await writer.write(event.key );
+    });
+  
+    connectBtn.addEventListener('click', async () => {
+      await connectSerial();
+    });
+  async function connectSerial() {
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        statusDisplay.textContent = " Connected";
+
+        const encoder = new TextEncoderStream();
+        const outputDone = encoder.readable.pipeTo(port.writable);
+        writer = encoder.writable.getWriter();
+
+        const decoder = new TextDecoderStream();
+        const inputDone = port.readable.pipeTo(decoder.writable);
+        reader = decoder.readable.getReader();
+
+        keepReading = true;
+        readLines(reader);
+
+      } catch (err) {
+        statusDisplay.textContent = " Connection failed";
+        console.error(err);
+      }
+    }
+  </script>
+</body>
+</html>
