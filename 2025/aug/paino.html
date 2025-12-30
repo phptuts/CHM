@@ -28,7 +28,6 @@
       try {
         port = await navigator.serial.requestPort();
         await port.open({ baudRate: 115200 });
-        statusDisplay.textContent = " Connected";
 
         const encoder = new TextEncoderStream();
         const outputDone = encoder.readable.pipeTo(port.writable);
@@ -42,7 +41,6 @@
         readLines(reader);
 
       } catch (err) {
-        statusDisplay.textContent = " Connection failed";
         console.error(err);
       }
     }
