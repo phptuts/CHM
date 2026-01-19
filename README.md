@@ -12,3 +12,7 @@ A simple way of storing stuff for Circuit Hacking Mondays.
 - [Brush-o-Matic](https://phptuts.github.io/CHM/2025/june/16/toothbrush_class.html)
 - [Project Code](https://github.com/phptuts/CHM/blob/main/2025/june/16/toothbrush_class.xml)
 - [ElectroBlocks Site](https://electroblocks-test--pr315-fixing-for-loop-bugs-ibhidqpy.web.app/)
+
+## Jan 19, 2026
+
+- [Led Lesson](2026/Jan/19/leds_and_buttons.md)
