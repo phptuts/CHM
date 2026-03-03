@@ -16,3 +16,7 @@ A simple way of storing stuff for Circuit Hacking Mondays.
 ## Jan 19, 2026
 
 - [Led Lesson](2026/Jan/19/leds_and_buttons.md)
+
+## Mar 2, 2026
+
+- [Robot Arm](https://phptuts.github.io/CHM/2026/Mar/2/index.html)

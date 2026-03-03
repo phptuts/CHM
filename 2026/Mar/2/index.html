@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Arduino Servo Controller</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; padding: 24px; max-width: 720px; margin: 0 auto; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .row { display: flex; align-items: center; gap: 12px; }
+    .row > * { flex: 1; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #ccc; background: #f7f7f7; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    input[type="range"] { width: 100%; }
+    code { background: #f2f2f2; padding: 2px 6px; border-radius: 6px; }
+    .log { height: 160px; overflow: auto; background: #111; color: #0f0; padding: 10px; border-radius: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Arduino Servo Controller</h1>
+  <p class="muted">
+    Sends messages like <code>1-90</code> over USB Serial (Web Serial).
+    This version ramps motion (sends small steps) and clamps to 0–160.
+    Use Chrome/Edge. Click <b>Connect</b> first.
+  </p>
+
+  <div class="card row">
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
+    <div id="status" class="muted">Not connected</div>
+  </div>
+
+  <div class="card">
+    <h2>Servo 1: <span id="s1Val">90</span>°</h2>
+    <input id="servo1" type="range" min="0" max="160" value="90" />
+    <div class="muted">Target message: <code id="s1Msg">1-90</code></div>
+  </div>
+
+  <div class="card">
+    <h2>Servo 2: <span id="s2Val">90</span>°</h2>
+    <input id="servo2" type="range" min="0" max="160" value="90" />
+    <div class="muted">Target message: <code id="s2Msg">2-90</code></div>
+  </div>
+
+  <div class="card">
+    <h2>Log</h2>
+    <div id="log" class="log"></div>
+  </div>
+
+<script>
+  // ---------- Tunables ----------
+  const MIN_ANGLE = 0;
+  const MAX_ANGLE = 160;
+
+  // Ramping behavior:
+  // Every tick, move current angle toward target by STEP_DEG, and send that value.
+  const STEP_DEG = 1;         // 1 degree steps (gentle)
+  const TICK_MS  = 15;        // 15ms per step ~ typical servo refresh cadence
+
+  // If you want fewer serial writes, set SEND_EVERY_N_TICKS to 2 or 3.
+  // (It will still ramp internally, just transmit less often.)
+  const SEND_EVERY_N_TICKS = 1;
+
+  // Safety: limit how often we *ever* write to serial (even if tick is fast).
+  // (Keeps things stable if you tweak values.)
+  const MIN_SEND_INTERVAL_MS = 15;
+  // -----------------------------
+
+  let port = null;
+  let writer = null;
+
+  const logEl = document.getElementById("log");
+  const statusEl = document.getElementById("status");
+  const connectBtn = document.getElementById("connectBtn");
+  const disconnectBtn = document.getElementById("disconnectBtn");
+
+  function log(line) {
+    const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 5;
+    logEl.textContent += line + "\n";
+    if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setConnected(connected) {
+    connectBtn.disabled = connected;
+    disconnectBtn.disabled = !connected;
+    statusEl.textContent = connected ? "Connected" : "Not connected";
+  }
+
+  async function connect() {
+    if (!("serial" in navigator)) {
+      alert("Web Serial not supported. Use Chrome or Edge.");
+      return;
+    }
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    writer = port.writable.getWriter();
+    setConnected(true);
+    log("Connected to serial port.");
+
+    // Send initial positions (current ramp positions)
+    await sendLine(`1-${servoState[1].current}`);
+    await sendLine(`2-${servoState[2].current}`);
+  }
+
+  async function disconnect() {
+    try {
+      if (writer) { writer.releaseLock(); writer = null; }
+      if (port) { await port.close(); port = null; }
+    } finally {
+      setConnected(false);
+      log("Disconnected.");
+    }
+  }
+
+  let lastSendAt = 0;
+  async function sendLine(line) {
+    if (!writer) return;
+    const now = performance.now();
+    if (now - lastSendAt < MIN_SEND_INTERVAL_MS) return;
+    lastSendAt = now;
+
+    const data = new TextEncoder().encode(line + "\n");
+    await writer.write(data);
+    // Comment out next line if log spam annoys you
+    // log(">> " + line);
+  }
+
+  connectBtn.addEventListener("click", () => connect().catch(err => log("ERROR: " + err)));
+  disconnectBtn.addEventListener("click", () => disconnect().catch(err => log("ERROR: " + err)));
+
+  // ---------- Servo ramp state ----------
+  function clampAngle(v) {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n)) return 90;
+    return Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, n));
+  }
+
+  // Track current + target for each servo id
+  const servoState = {
+    1: { current: 90, target: 90, tickCount: 0 },
+    2: { current: 90, target: 90, tickCount: 0 },
+  };
+
+  function stepToward(current, target, step) {
+    if (current === target) return current;
+    const delta = target - current;
+    if (Math.abs(delta) <= step) return target;
+    return current + Math.sign(delta) * step;
+  }
+
+  async function rampLoopTick() {
+    // Servo 1
+    {
+      const s = servoState[1];
+      const next = stepToward(s.current, s.target, STEP_DEG);
+      if (next !== s.current) {
+        s.current = next;
+        s.tickCount++;
+        if (s.tickCount % SEND_EVERY_N_TICKS === 0) {
+          await sendLine(`1-${s.current}`);
+        }
+      }
+    }
+
+    // Servo 2
+    {
+      const s = servoState[2];
+      const next = stepToward(s.current, s.target, STEP_DEG);
+      if (next !== s.current) {
+        s.current = next;
+        s.tickCount++;
+        if (s.tickCount % SEND_EVERY_N_TICKS === 0) {
+          await sendLine(`2-${s.current}`);
+        }
+      }
+    }
+  }
+
+  setInterval(() => {
+    rampLoopTick().catch(err => log("ERROR: " + err));
+  }, TICK_MS);
+
+  // ---------- UI bindings ----------
+  const servo1 = document.getElementById("servo1");
+  const servo2 = document.getElementById("servo2");
+  const s1Val = document.getElementById("s1Val");
+  const s2Val = document.getElementById("s2Val");
+  const s1Msg = document.getElementById("s1Msg");
+  const s2Msg = document.getElementById("s2Msg");
+
+  function updateUiTargets() {
+    s1Val.textContent = servoState[1].target;
+    s2Val.textContent = servoState[2].target;
+    s1Msg.textContent = `1-${servoState[1].target}`;
+    s2Msg.textContent = `2-${servoState[2].target}`;
+  }
+
+  servo1.addEventListener("input", () => {
+    servoState[1].target = clampAngle(servo1.value);
+    updateUiTargets();
+  });
+
+  servo2.addEventListener("input", () => {
+    servoState[2].target = clampAngle(servo2.value);
+    updateUiTargets();
+  });
+
+  // Initialize
+  servo1.max = String(MAX_ANGLE);
+  servo2.max = String(MAX_ANGLE);
+
+  servoState[1].current = clampAngle(servo1.value);
+  servoState[2].current = clampAngle(servo2.value);
+  servoState[1].target = servoState[1].current;
+  servoState[2].target = servoState[2].current;
+
+  updateUiTargets();
+</script>
+</body>
+</html>
