@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Arduino Mustache Overlay Booth</title>
+	<style>
+		:root {
+			--ink: #1f2937;
+			--paper: #f6f7fb;
+			--accent: #0f766e;
+			--accent-soft: #ccfbf1;
+			--card: #ffffff;
+			--line: #d1d5db;
+			--shadow: rgba(2, 6, 23, 0.15);
+		}
+
+		* {
+			box-sizing: border-box;
+		}
+
+		body {
+			margin: 0;
+			font-family: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
+			color: var(--ink);
+			background:
+				radial-gradient(circle at 20% 10%, #cffafe 0%, transparent 40%),
+				radial-gradient(circle at 80% 90%, #fef3c7 0%, transparent 35%),
+				var(--paper);
+			min-height: 100vh;
+			padding: 24px;
+		}
+
+		.app {
+			max-width: 1100px;
+			margin: 0 auto;
+			display: grid;
+			gap: 20px;
+			grid-template-columns: 320px 1fr;
+		}
+
+		.panel,
+		.stage {
+			background: var(--card);
+			border: 1px solid var(--line);
+			border-radius: 16px;
+			box-shadow: 0 12px 30px var(--shadow);
+		}
+
+		.panel {
+			padding: 18px;
+			display: grid;
+			gap: 14px;
+			align-content: start;
+		}
+
+		.stage {
+			padding: 14px;
+			overflow: auto;
+		}
+
+		h1 {
+			margin: 0;
+			font-size: 1.3rem;
+			letter-spacing: 0.02em;
+		}
+
+		.hint {
+			font-size: 0.9rem;
+			line-height: 1.35;
+			background: var(--accent-soft);
+			border: 1px solid #99f6e4;
+			padding: 10px;
+			border-radius: 10px;
+		}
+
+		.row {
+			display: grid;
+			gap: 8px;
+		}
+
+		label {
+			font-size: 0.9rem;
+			font-weight: 600;
+		}
+
+		input[type="file"],
+		input[type="range"],
+		button {
+			width: 100%;
+		}
+
+		button {
+			border: 1px solid #134e4a;
+			border-radius: 10px;
+			padding: 10px 12px;
+			cursor: pointer;
+			background: var(--accent);
+			color: #fff;
+			font-weight: 600;
+			transition: transform 120ms ease, filter 120ms ease;
+		}
+
+		button:hover {
+			filter: brightness(1.05);
+			transform: translateY(-1px);
+		}
+
+		button.secondary {
+			background: #fff;
+			color: var(--ink);
+			border-color: var(--line);
+		}
+
+		.status {
+			font-family: "Menlo", "Consolas", monospace;
+			font-size: 0.85rem;
+			background: #0f172a;
+			color: #93c5fd;
+			border-radius: 8px;
+			padding: 10px;
+			min-height: 66px;
+			white-space: pre-wrap;
+		}
+
+		canvas {
+			display: block;
+			max-width: 100%;
+			width: min(100%, 760px);
+			border-radius: 12px;
+			border: 2px solid #111827;
+			background: #fff;
+			margin: 0 auto;
+			touch-action: none;
+		}
+
+		@media (max-width: 900px) {
+			.app {
+				grid-template-columns: 1fr;
+			}
+		}
+	</style>
+</head>
+<body>
+	<main class="app">
+		<section class="panel">
+			<h1>Arduino Mustache Booth</h1>
+			<p class="hint">
+				1) Start webcam to use live camera as the background.<br />
+				2) Use the default mustache or upload your own overlay image.<br />
+				3) Move overlay via Arduino serial commands (or arrow keys for testing).
+			</p>
+
+			<div class="row">
+				<button id="startWebcamBtn">Start Webcam</button>
+				<button id="stopWebcamBtn" class="secondary">Stop Webcam</button>
+			</div>
+
+			<div class="row">
+				<label for="overlayInput">Upload Mustache / Overlay Image</label>
+				<input id="overlayInput" type="file" accept="image/*" />
+			</div>
+
+			<div class="row">
+				<label for="scaleInput">Overlay Size</label>
+				<input id="scaleInput" type="range" min="40" max="360" value="140" />
+			</div>
+
+			<div class="row">
+				<button id="connectSerialBtn">Connect Arduino Serial</button>
+				<button id="disconnectSerialBtn" class="secondary">Disconnect Serial</button>
+			</div>
+
+			<div class="row">
+				<button id="downloadBtn">Download PNG</button>
+			</div>
+
+			<div id="status" class="status">Status: Ready</div>
+		</section>
+
+		<section class="stage">
+			<canvas id="boothCanvas" width="960" height="540"></canvas>
+		</section>
+	</main>
+
+	<script>
+		const canvas = document.getElementById("boothCanvas");
+		const ctx = canvas.getContext("2d");
+
+		const startWebcamBtn = document.getElementById("startWebcamBtn");
+		const stopWebcamBtn = document.getElementById("stopWebcamBtn");
+		const overlayInput = document.getElementById("overlayInput");
+		const scaleInput = document.getElementById("scaleInput");
+		const connectSerialBtn = document.getElementById("connectSerialBtn");
+		const disconnectSerialBtn = document.getElementById("disconnectSerialBtn");
+		const downloadBtn = document.getElementById("downloadBtn");
+		const statusEl = document.getElementById("status");
+
+		const MOVE_STEP = 3;
+
+		const webcamVideo = document.createElement("video");
+		webcamVideo.autoplay = true;
+		webcamVideo.playsInline = true;
+
+		const overlayImage = new Image();
+
+		let webcamStream = null;
+		let webcamActive = false;
+		let hasOverlay = false;
+		let overlayX = canvas.width / 2;
+		let overlayY = canvas.height / 2;
+		let overlaySize = Number(scaleInput.value);
+
+		let serialPort = null;
+		let serialReader = null;
+		let keepReading = false;
+
+		function setStatus(text) {
+			statusEl.textContent = text;
+		}
+
+		function drawGridBackground() {
+			ctx.fillStyle = "#f8fafc";
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+			ctx.strokeStyle = "#e2e8f0";
+			ctx.lineWidth = 1;
+			for (let x = 0; x < canvas.width; x += 40) {
+				ctx.beginPath();
+				ctx.moveTo(x, 0);
+				ctx.lineTo(x, canvas.height);
+				ctx.stroke();
+			}
+			for (let y = 0; y < canvas.height; y += 40) {
+				ctx.beginPath();
+				ctx.moveTo(0, y);
+				ctx.lineTo(canvas.width, y);
+				ctx.stroke();
+			}
+			ctx.fillStyle = "#334155";
+			ctx.font = "18px Trebuchet MS";
+			ctx.fillText("Start webcam to begin", 26, 36);
+		}
+
+		function drawScene() {
+			if (webcamActive && webcamVideo.readyState >= 2) {
+				ctx.clearRect(0, 0, canvas.width, canvas.height);
+				ctx.drawImage(webcamVideo, 0, 0, canvas.width, canvas.height);
+			} else {
+				drawGridBackground();
+			}
+
+			if (hasOverlay) {
+				const aspect = overlayImage.height / overlayImage.width || 0.35;
+				const drawW = overlaySize;
+				const drawH = overlaySize * aspect;
+				const x = overlayX - drawW / 2;
+				const y = overlayY - drawH / 2;
+				ctx.drawImage(overlayImage, x, y, drawW, drawH);
+			}
+		}
+
+		function clampOverlay() {
+			overlayX = Math.max(0, Math.min(canvas.width, overlayX));
+			overlayY = Math.max(0, Math.min(canvas.height, overlayY));
+		}
+
+		function defaultMustacheDataUri() {
+			// Cartoon rainbow mustache with sparkles for a funny, kid-safe default.
+			const svg = `
+				<svg xmlns="http://www.w3.org/2000/svg" width="520" height="220" viewBox="0 0 520 220">
+					<defs>
+						<linearGradient id="lipPop" x1="0" y1="0" x2="1" y2="0">
+							<stop offset="0%" stop-color="#ef4444"/>
+							<stop offset="20%" stop-color="#f59e0b"/>
+							<stop offset="40%" stop-color="#facc15"/>
+							<stop offset="60%" stop-color="#22c55e"/>
+							<stop offset="80%" stop-color="#3b82f6"/>
+							<stop offset="100%" stop-color="#ec4899"/>
+						</linearGradient>
+					</defs>
+
+					<path fill="url(#lipPop)" stroke="#0f172a" stroke-width="8" stroke-linejoin="round" d="
+						M48,113
+						C56,66 108,47 146,72
+						C175,91 193,116 225,118
+						C243,119 255,109 268,96
+						C278,86 294,86 304,96
+						C317,109 329,119 347,118
+						C379,116 397,91 426,72
+						C464,47 516,66 524,113
+						C503,98 482,101 468,113
+						C453,126 441,146 432,167
+						C419,147 407,135 392,129
+						C369,121 349,126 327,139
+						C311,149 298,157 286,157
+						C273,157 260,149 244,139
+						C222,126 202,121 179,129
+						C164,135 152,147 139,167
+						C130,146 118,126 103,113
+						C89,101 68,98 48,113 Z"/>
+
+					<circle cx="260" cy="120" r="10" fill="#ffffff" stroke="#0f172a" stroke-width="4"/>
+					<circle cx="260" cy="120" r="3" fill="#0f172a"/>
+
+					<circle cx="95" cy="44" r="7" fill="#fbbf24"/>
+					<circle cx="435" cy="34" r="7" fill="#f472b6"/>
+					<circle cx="404" cy="184" r="7" fill="#22d3ee"/>
+					<circle cx="128" cy="176" r="7" fill="#86efac"/>
+
+					<path d="M80 82 L88 102 L108 110 L88 118 L80 138 L72 118 L52 110 L72 102 Z" fill="#fde68a" stroke="#0f172a" stroke-width="3"/>
+					<path d="M441 76 L448 93 L466 100 L448 107 L441 124 L434 107 L416 100 L434 93 Z" fill="#fbcfe8" stroke="#0f172a" stroke-width="3"/>
+				</svg>`;
+			return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+		}
+
+		function loadImageFromFile(file, targetImage, onDone) {
+			const reader = new FileReader();
+			reader.onload = () => {
+				targetImage.onload = onDone;
+				targetImage.src = reader.result;
+			};
+			reader.readAsDataURL(file);
+		}
+
+		function drawLoop() {
+			drawScene();
+			requestAnimationFrame(drawLoop);
+		}
+
+		async function startWebcam() {
+			try {
+				if (webcamActive) {
+					setStatus("Status: Webcam already running.");
+					return;
+				}
+				webcamStream = await navigator.mediaDevices.getUserMedia({
+					video: { facingMode: "user" },
+					audio: false
+				});
+				webcamVideo.srcObject = webcamStream;
+				await webcamVideo.play();
+				webcamActive = true;
+				setStatus("Status: Webcam started.");
+			} catch (error) {
+				setStatus(`Status: Webcam start failed: ${error.message}`);
+			}
+		}
+
+		async function stopWebcam() {
+			try {
+				if (webcamStream) {
+					for (const track of webcamStream.getTracks()) {
+						track.stop();
+					}
+				}
+				webcamVideo.srcObject = null;
+				webcamStream = null;
+				webcamActive = false;
+				setStatus("Status: Webcam stopped.");
+			} catch (error) {
+				setStatus(`Status: Webcam stop failed: ${error.message}`);
+			}
+		}
+
+		function moveOverlay(direction) {
+			if (direction === "UP") overlayY -= MOVE_STEP;
+			if (direction === "DOWN") overlayY += MOVE_STEP;
+			if (direction === "LEFT") overlayX -= MOVE_STEP;
+			if (direction === "RIGHT") overlayX += MOVE_STEP;
+			clampOverlay();
+			drawScene();
+		}
+
+		async function listenSerial() {
+			if (!serialPort) return;
+			keepReading = true;
+			setStatus("Status: Serial connected. Listening for UP/DOWN/LEFT/RIGHT...");
+
+			const decoder = new TextDecoderStream();
+			serialPort.readable.pipeTo(decoder.writable).catch(() => {});
+			const inputStream = decoder.readable;
+			serialReader = inputStream.getReader();
+
+			let buffer = "";
+			try {
+				while (keepReading) {
+					const { value, done } = await serialReader.read();
+					if (done) break;
+					buffer += value || "";
+
+					let newlineIndex = buffer.indexOf("\n");
+					while (newlineIndex !== -1) {
+						const line = buffer.slice(0, newlineIndex).trim().toUpperCase();
+						buffer = buffer.slice(newlineIndex + 1);
+
+						if (["UP", "DOWN", "LEFT", "RIGHT"].includes(line)) {
+							moveOverlay(line);
+							setStatus(`Status: Serial command received: ${line}`);
+						}
+
+						newlineIndex = buffer.indexOf("\n");
+					}
+				}
+			} catch (error) {
+				setStatus(`Status: Serial read error: ${error.message}`);
+			}
+		}
+
+		async function connectSerial() {
+			if (!("serial" in navigator)) {
+				setStatus("Status: Web Serial API not available in this browser.");
+				return;
+			}
+
+			try {
+				serialPort = await navigator.serial.requestPort();
+				await serialPort.open({ baudRate: 115200 });
+				listenSerial();
+			} catch (error) {
+				setStatus(`Status: Serial connect failed: ${error.message}`);
+			}
+		}
+
+		async function disconnectSerial() {
+			keepReading = false;
+			try {
+				if (serialReader) {
+					await serialReader.cancel();
+					serialReader.releaseLock();
+					serialReader = null;
+				}
+				if (serialPort) {
+					await serialPort.close();
+					serialPort = null;
+				}
+				setStatus("Status: Serial disconnected.");
+			} catch (error) {
+				setStatus(`Status: Serial disconnect error: ${error.message}`);
+			}
+		}
+
+		startWebcamBtn.addEventListener("click", startWebcam);
+		stopWebcamBtn.addEventListener("click", stopWebcam);
+
+		overlayInput.addEventListener("change", (event) => {
+			const file = event.target.files[0];
+			if (!file) return;
+			loadImageFromFile(file, overlayImage, () => {
+				hasOverlay = true;
+				drawScene();
+				setStatus("Status: Overlay image loaded.");
+			});
+		});
+
+		scaleInput.addEventListener("input", () => {
+			overlaySize = Number(scaleInput.value);
+			drawScene();
+		});
+
+		connectSerialBtn.addEventListener("click", connectSerial);
+		disconnectSerialBtn.addEventListener("click", disconnectSerial);
+
+		downloadBtn.addEventListener("click", () => {
+			const link = document.createElement("a");
+			link.download = "my-arduino-mustache-photo.png";
+			link.href = canvas.toDataURL("image/png");
+			link.click();
+			setStatus("Status: PNG downloaded.");
+		});
+
+		// Keyboard fallback is useful while testing without Arduino hardware.
+		window.addEventListener("keydown", (event) => {
+			const map = {
+				ArrowUp: "UP",
+				ArrowDown: "DOWN",
+				ArrowLeft: "LEFT",
+				ArrowRight: "RIGHT"
+			};
+			if (map[event.key]) {
+				moveOverlay(map[event.key]);
+			}
+		});
+
+		overlayImage.onload = () => {
+			hasOverlay = true;
+		};
+		overlayImage.src = defaultMustacheDataUri();
+
+		window.addEventListener("beforeunload", () => {
+			if (webcamStream) {
+				for (const track of webcamStream.getTracks()) {
+					track.stop();
+				}
+			}
+		});
+
+		drawLoop();
+	</script>
+</body>
+</html>

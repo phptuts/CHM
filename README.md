@@ -20,3 +20,10 @@ A simple way of storing stuff for Circuit Hacking Mondays.
 ## Mar 2, 2026
 
 - [Robot Arm](https://phptuts.github.io/CHM/2026/Mar/2/index.html)
+
+## Mar 9, 2026
+
+[Arduino Mustache Booth](https://phptuts.github.io/CHM/2026/Mar/9/index.html)
+
+### Funny Stache Pic!
+![Funny Mustache](/2026/Mar/9/mustache.png)
