@@ -25,5 +25,9 @@ A simple way of storing stuff for Circuit Hacking Mondays.
 
 [Arduino Mustache Booth](https://phptuts.github.io/CHM/2026/Mar/9/index.html)
 
+## April 20, 2026
+
+[Arduino Dino](https://phptuts.github.io/CHM/2026/April/20/index.html)
+
 ### Funny Stache Pic!
 ![Funny Mustache](/2026/Mar/9/mustache.png)

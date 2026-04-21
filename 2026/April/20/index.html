@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Motion Dino Alert</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+	<style>
+		:root {
+			--bg-1: #07141d;
+			--bg-2: #0a2b2e;
+			--accent: #f4b400;
+			--accent-2: #2dd4bf;
+			--panel: rgba(8, 21, 29, 0.78);
+			--text: #f4f8ff;
+			--muted: #9cb5c8;
+			--danger: #ff6a3d;
+			--ok: #3be477;
+		}
+
+		* {
+			box-sizing: border-box;
+		}
+
+		body {
+			margin: 0;
+			min-height: 100vh;
+			font-family: "Space Grotesk", sans-serif;
+			color: var(--text);
+			background:
+				radial-gradient(circle at 12% 18%, rgba(244, 180, 0, 0.2), transparent 40%),
+				radial-gradient(circle at 84% 12%, rgba(45, 212, 191, 0.22), transparent 38%),
+				linear-gradient(155deg, var(--bg-1), var(--bg-2));
+			display: grid;
+			place-items: center;
+			padding: 18px;
+		}
+
+		.shell {
+			width: min(980px, 100%);
+			background: var(--panel);
+			border: 1px solid rgba(255, 255, 255, 0.16);
+			border-radius: 20px;
+			box-shadow: 0 24px 50px rgba(0, 0, 0, 0.35);
+			overflow: hidden;
+			backdrop-filter: blur(4px);
+			animation: riseIn 540ms ease-out;
+		}
+
+		.topbar {
+			padding: 14px 18px;
+			border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+			display: flex;
+			gap: 12px;
+			flex-wrap: wrap;
+			align-items: center;
+			justify-content: space-between;
+		}
+
+		.title {
+			margin: 0;
+			font-family: "Bungee", cursive;
+			font-weight: 400;
+			letter-spacing: 0.5px;
+			font-size: clamp(1.2rem, 2.4vw, 1.9rem);
+			color: var(--accent);
+			text-shadow: 0 0 14px rgba(244, 180, 0, 0.32);
+		}
+
+		.controls {
+			display: flex;
+			gap: 8px;
+			flex-wrap: wrap;
+		}
+
+		button {
+			border: none;
+			border-radius: 999px;
+			padding: 10px 14px;
+			font-family: inherit;
+			font-size: 0.95rem;
+			font-weight: 700;
+			color: #041016;
+			background: linear-gradient(120deg, var(--accent), #ffdf75);
+			cursor: pointer;
+			transition: transform 120ms ease, filter 120ms ease;
+		}
+
+		button:hover {
+			transform: translateY(-1px);
+			filter: brightness(1.05);
+		}
+
+		button:active {
+			transform: translateY(0);
+		}
+
+		button.secondary {
+			background: linear-gradient(120deg, #91fff3, var(--accent-2));
+		}
+
+		.content {
+			padding: 16px;
+			display: grid;
+			gap: 14px;
+		}
+
+		.camera-wrap {
+			position: relative;
+			width: 100%;
+			border-radius: 14px;
+			overflow: hidden;
+			border: 1px solid rgba(255, 255, 255, 0.16);
+			background: #030a0f;
+			aspect-ratio: 4 / 3;
+		}
+
+		#cameraCanvas {
+			display: block;
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+		}
+
+		.badge {
+			position: absolute;
+			top: 10px;
+			left: 10px;
+			background: rgba(0, 0, 0, 0.62);
+			border: 1px solid rgba(255, 255, 255, 0.16);
+			padding: 8px 10px;
+			border-radius: 10px;
+			font-size: 0.86rem;
+			color: var(--muted);
+		}
+
+		.stats {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+			gap: 10px;
+		}
+
+		.card {
+			background: rgba(255, 255, 255, 0.03);
+			border: 1px solid rgba(255, 255, 255, 0.12);
+			border-radius: 12px;
+			padding: 10px 12px;
+		}
+
+		.label {
+			font-size: 0.76rem;
+			text-transform: uppercase;
+			letter-spacing: 0.08em;
+			color: var(--muted);
+			margin-bottom: 6px;
+		}
+
+		.value {
+			font-size: 1.1rem;
+			font-weight: 700;
+		}
+
+		.value.ok {
+			color: var(--ok);
+		}
+
+		.value.warn {
+			color: var(--danger);
+		}
+
+		.log {
+			max-height: 160px;
+			overflow: auto;
+			font-size: 0.9rem;
+			color: #c5d9ea;
+			line-height: 1.4;
+			background: rgba(0, 0, 0, 0.22);
+			border: 1px solid rgba(255, 255, 255, 0.08);
+			border-radius: 10px;
+			padding: 10px;
+			margin: 0;
+			white-space: pre-wrap;
+		}
+
+		@keyframes riseIn {
+			from {
+				opacity: 0;
+				transform: translateY(10px) scale(0.99);
+			}
+			to {
+				opacity: 1;
+				transform: translateY(0) scale(1);
+			}
+		}
+	</style>
+</head>
+<body>
+	<main class="shell">
+		<header class="topbar">
+			<h1 class="title">Motion Dino Alert</h1>
+			<div class="controls">
+				<button id="startCameraBtn">Start Camera</button>
+				<button id="connectArduinoBtn" class="secondary">Connect Arduino</button>
+			</div>
+		</header>
+
+		<div class="content">
+			<div class="camera-wrap">
+				<canvas id="cameraCanvas"></canvas>
+				<div class="badge" id="statusBadge">Camera Off</div>
+			</div>
+
+			<div class="stats">
+				<div class="card">
+					<div class="label">Motion</div>
+					<div class="value" id="motionState">Idle</div>
+				</div>
+				<div class="card">
+					<div class="label">Arduino</div>
+					<div class="value" id="arduinoState">Not connected</div>
+				</div>
+				<div class="card">
+					<div class="label">Last Sent</div>
+					<div class="value" id="lastSent">Never</div>
+				</div>
+				<div class="card">
+					<div class="label">Cooldown</div>
+					<div class="value" id="cooldown">Ready</div>
+				</div>
+			</div>
+
+			<pre class="log" id="log">Ready.
+1) Start camera
+2) Connect Arduino
+3) Move in front of the camera</pre>
+		</div>
+	</main>
+
+	<video id="cameraVideo" autoplay playsinline muted style="display:none"></video>
+	<canvas id="analysisCanvas" width="320" height="240" style="display:none"></canvas>
+	<audio id="dinoSound" src="dino.mp3" preload="auto"></audio>
+
+	<script>
+		const MOVE_COOLDOWN_MS = 10000;
+		const MOTION_THRESHOLD = 22;
+		const MIN_CHANGED_PIXELS = 3400;
+
+		const startCameraBtn = document.getElementById("startCameraBtn");
+		const connectArduinoBtn = document.getElementById("connectArduinoBtn");
+		const cameraCanvas = document.getElementById("cameraCanvas");
+		const statusBadge = document.getElementById("statusBadge");
+		const motionState = document.getElementById("motionState");
+		const arduinoState = document.getElementById("arduinoState");
+		const lastSent = document.getElementById("lastSent");
+		const cooldown = document.getElementById("cooldown");
+		const logEl = document.getElementById("log");
+
+		const video = document.getElementById("cameraVideo");
+		const analysisCanvas = document.getElementById("analysisCanvas");
+		const dinoSound = document.getElementById("dinoSound");
+		const analysisCtx = analysisCanvas.getContext("2d", { willReadFrequently: true });
+		const cameraCtx = cameraCanvas.getContext("2d");
+
+		let previousFrame = null;
+		let isCameraOn = false;
+		let writer = null;
+		let serialPort = null;
+		let lastMoveSentAt = 0;
+		let lastMotionDetectedAt = 0;
+		let audioReady = false;
+
+		function appendLog(message) {
+			const now = new Date().toLocaleTimeString();
+			logEl.textContent = `[${now}] ${message}\n` + logEl.textContent;
+		}
+
+		function updateCooldown() {
+			if (!lastMoveSentAt) {
+				cooldown.textContent = "Ready";
+				cooldown.className = "value ok";
+				return;
+			}
+
+			const elapsed = Date.now() - lastMoveSentAt;
+			const remaining = Math.max(0, MOVE_COOLDOWN_MS - elapsed);
+			if (remaining === 0) {
+				cooldown.textContent = "Ready";
+				cooldown.className = "value ok";
+			} else {
+				cooldown.textContent = `${Math.ceil(remaining / 1000)}s`;
+				cooldown.className = "value warn";
+			}
+		}
+
+		function updateCanvasSize() {
+			const rect = cameraCanvas.getBoundingClientRect();
+			cameraCanvas.width = Math.floor(rect.width);
+			cameraCanvas.height = Math.floor(rect.height);
+		}
+
+		async function armAudioPlayback() {
+			if (audioReady) {
+				return;
+			}
+
+			try {
+				dinoSound.muted = true;
+				await dinoSound.play();
+				dinoSound.pause();
+				dinoSound.currentTime = 0;
+				dinoSound.muted = false;
+				audioReady = true;
+			} catch {
+				appendLog("Tap Start Camera once to allow MP3 sound playback.");
+			}
+		}
+
+		async function playDinoSound() {
+			try {
+				dinoSound.currentTime = 0;
+				await dinoSound.play();
+			} catch {
+				appendLog("Could not play dino.mp3 yet. Click a button once to enable audio.");
+			}
+		}
+
+		async function sendMoveToArduino() {
+			if (!writer) {
+				appendLog("Motion detected, but Arduino is not connected.");
+				return;
+			}
+
+			try {
+				await writer.write(new TextEncoder().encode("MOVE\n"));
+				lastMoveSentAt = Date.now();
+				lastSent.textContent = new Date(lastMoveSentAt).toLocaleTimeString();
+				appendLog("Sent: Move");
+			} catch (error) {
+				appendLog(`Failed to send Move: ${error.message}`);
+			}
+		}
+
+		async function connectArduino() {
+			await armAudioPlayback();
+
+			if (!("serial" in navigator)) {
+				appendLog("Web Serial is not available in this browser. Use Chrome/Edge over HTTPS or localhost.");
+				arduinoState.textContent = "Web Serial unsupported";
+				arduinoState.className = "value warn";
+				return;
+			}
+
+			try {
+				serialPort = await navigator.serial.requestPort();
+				await serialPort.open({ baudRate: 9600 });
+				writer = serialPort.writable.getWriter();
+				arduinoState.textContent = "Connected";
+				arduinoState.className = "value ok";
+				appendLog("Arduino connected.");
+			} catch (error) {
+				appendLog(`Arduino connection failed: ${error.message}`);
+			}
+		}
+
+		function detectMotionAndRender() {
+			if (!isCameraOn) {
+				return;
+			}
+
+			cameraCtx.drawImage(video, 0, 0, cameraCanvas.width, cameraCanvas.height);
+
+			analysisCtx.drawImage(video, 0, 0, analysisCanvas.width, analysisCanvas.height);
+			const imageData = analysisCtx.getImageData(0, 0, analysisCanvas.width, analysisCanvas.height);
+			const currentFrame = imageData.data;
+
+			let changedPixels = 0;
+			if (previousFrame) {
+				for (let i = 0; i < currentFrame.length; i += 4) {
+					const dr = Math.abs(currentFrame[i] - previousFrame[i]);
+					const dg = Math.abs(currentFrame[i + 1] - previousFrame[i + 1]);
+					const db = Math.abs(currentFrame[i + 2] - previousFrame[i + 2]);
+					const diff = dr + dg + db;
+					if (diff > MOTION_THRESHOLD) {
+						changedPixels += 1;
+					}
+				}
+			}
+
+			previousFrame = new Uint8ClampedArray(currentFrame);
+
+			const motionDetected = changedPixels > MIN_CHANGED_PIXELS;
+
+			if (motionDetected) {
+				motionState.textContent = "Movement detected";
+				motionState.className = "value warn";
+				lastMotionDetectedAt = Date.now();
+
+				const canSend = Date.now() - lastMoveSentAt >= MOVE_COOLDOWN_MS;
+				if (canSend) {
+					playDinoSound();
+					sendMoveToArduino();
+				}
+			} else if (Date.now() - lastMotionDetectedAt > 800) {
+				motionState.textContent = "Idle";
+				motionState.className = "value";
+			}
+
+			updateCooldown();
+			requestAnimationFrame(detectMotionAndRender);
+		}
+
+		async function startCamera() {
+			await armAudioPlayback();
+
+			if (isCameraOn) {
+				appendLog("Camera is already on.");
+				return;
+			}
+
+			try {
+				const stream = await navigator.mediaDevices.getUserMedia({
+					video: {
+						width: { ideal: 1280 },
+						height: { ideal: 720 },
+						facingMode: "user"
+					},
+					audio: false
+				});
+
+				video.srcObject = stream;
+				await video.play();
+				updateCanvasSize();
+				isCameraOn = true;
+				statusBadge.textContent = "Camera On";
+				appendLog("Camera started.");
+				requestAnimationFrame(detectMotionAndRender);
+			} catch (error) {
+				appendLog(`Camera start failed: ${error.message}`);
+			}
+		}
+
+		window.addEventListener("resize", updateCanvasSize);
+		setInterval(updateCooldown, 250);
+
+		startCameraBtn.addEventListener("click", startCamera);
+		connectArduinoBtn.addEventListener("click", connectArduino);
+	</script>
+</body>
+</html>
