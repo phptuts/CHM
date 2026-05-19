@@ -88,6 +88,7 @@ Go to:
 Replace the pin section with:
 
 ```cpp
+#define MAX_DEVICES 1
 #define DATA_PIN 23
 #define CLK_PIN 18
 #define CS_PIN 5
