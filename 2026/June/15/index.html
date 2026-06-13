@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Arduino LCD Sender</title>
+</head>
+<body>
+  <h1>Send Message to Arduino</h1>
+
+  <button onclick="connectArduino()">Connect Arduino</button>
+
+  <br><br>
+
+  <input id="row1" placeholder="Row 1 text">
+  <br><br>
+
+  <input id="row2" placeholder="Row 2 text">
+  <br><br>
+
+  <button onclick="sendMessage()">Send Message</button>
+
+  <p id="status">Not connected</p>
+
+  <script>
+    let port;
+    let writer;
+
+    async function connectArduino() {
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+
+        const encoder = new TextEncoderStream();
+        encoder.readable.pipeTo(port.writable);
+        writer = encoder.writable.getWriter();
+
+        document.getElementById("status").textContent = "Arduino connected!";
+      } catch (error) {
+        document.getElementById("status").textContent = "Connection failed.";
+        console.error(error);
+      }
+    }
+
+    async function sendMessage() {
+      if (!writer) {
+        alert("Connect to Arduino first!");
+        return;
+      }
+
+      const row1 = document.getElementById("row1").value;
+      const row2 = document.getElementById("row2").value;
+
+      const message = row1 + "-" + row2 + "\n";
+
+      await writer.write(message + "|");
+
+      document.getElementById("status").textContent = "Sent: " + message;
+    }
+  </script>
+</body>
+</html>
